@@ -265,6 +265,42 @@
             vertical-align: middle;
         }
 
+        #ai-status-indicator {
+            position: absolute;
+            top: 40px;
+            right: 40px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #333;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s;
+            z-index: 100;
+        }
+
+        #ai-status-indicator.active {
+            background: #00aaff;
+            box-shadow: 0 0 20px #00aaff;
+            animation: pulseAI 1.5s infinite;
+        }
+
+        @keyframes pulseAI {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.5);
+                opacity: 0.7;
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
         /* --- Interact Feedback Overlay --- */
         #feedback-overlay {
             position: absolute;
@@ -489,6 +525,13 @@
 
     <!-- Main UI -->
     <div id="ui-layer">
+        <div id="ai-status-indicator" style="display: none;"></div>
+        <script>
+            // Simple inline script to toggle visibility based on URL straight away
+            if (new URLSearchParams(window.location.search).get('ai') !== 'false') {
+                document.getElementById('ai-status-indicator').style.display = 'block';
+            }
+        </script>
         <header>
             <div id="category-container" class="category-row">
                 <!-- Dynamically populated -->
@@ -532,15 +575,30 @@
                 👆👇 Point Up/Down (Hold) to Change Category<br>
                 👍👎 Thumb Up/Down (Hold) for Basket Add / Remove<br>
                 👌 OK Sign (Pinch) (Hold) to Review / Submit<br>
+                🤲 Palm to Start/Stop AI Assistant<br>
+                <span id="ai-hints"></span>
             </div>
         </footer>
     </div>
 
     <!-- Libs -->
+    <script type="importmap">
+        {
+          "imports": {
+            "@google/genai": "https://esm.run/@google/genai"
+          }
+        }
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+    <script type="module">
+        import { GoogleGenAI, Modality } from '@google/genai';
+        window.GoogleGenAI = GoogleGenAI;
+        window.Modality = Modality;
+    </script>
 
     <script>
         // --- 1. DATA & STATE ---
@@ -624,6 +682,14 @@
                     "image_url": "https://s3.staxel.ai/staxel-dev/assets/images/019b1a9f-7126-71b0-84e7-4146b8cf803e.png"
                 }
             ]
+        };
+
+        // --- CONFIG & ENV ---
+        const URL_PARAMS = new URLSearchParams(window.location.search);
+        const CONFIG = {
+            // Check URL param 'ai' (true/false), or default to true.
+            // In a real build, we would check process.env.ENABLE_AI here.
+            ENABLE_AI_ASSISTANT: URL_PARAMS.get('ai') !== 'false'
         };
 
         const STATE = {
@@ -720,7 +786,16 @@
             els.cards[1].wrap.className = 'card-container card-hidden';
 
             renderDots();
+            renderDots();
             updateBasketUI();
+
+            if (CONFIG.ENABLE_AI_ASSISTANT) {
+                const hintEl = document.getElementById('ai-hints');
+                if (hintEl) {
+                    hintEl.innerHTML = `
+                ✋✋ Two Palms (Hold) to Toggle Assistant<br>`;
+                }
+            }
 
             // Start Loop if needed or just wait for events
         }
@@ -1189,6 +1264,67 @@
                 }
             }
 
+            // ... (Previous Gestures)
+
+            if (CONFIG.ENABLE_AI_ASSISTANT && !activeAction && !GESTURE.pointer.active && !GESTURE.thumbDown.active && !GESTURE.thumbUp.active && !GESTURE.right.isPinching) {
+                // Check for Open Hand (Palm)
+                // 1. One Palm -> Start AI
+                // 2. Two Palms -> Stop AI
+
+                let openHands = [];
+                hands.forEach((h, i) => {
+                    if (isHandOpen(h)) openHands.push(h);
+                });
+
+                if (openHands.length === 2) {
+                    // Determine Action
+                    let action = null;
+
+                    // Toggle Logic: Always use 2 open hands
+                    // If Connected -> STOP
+                    // If Disconnected -> START
+                    if (AI_MANAGER.isConnected) {
+                        action = 'stop_ai';
+                    } else {
+                        action = 'start_ai';
+                    }
+
+                    if (action) {
+                        if (!GESTURE.palmHold) {
+                            GESTURE.palmHold = { active: true, startTime: now, action: action };
+                        } else if (GESTURE.palmHold.action === action) {
+                            // Continue Hold
+                            activeAction = true;
+                            const elapsed = now - GESTURE.palmHold.startTime;
+                            const reqTime = 1500; // 1.5s hold for AI to prevent accidental triggers
+                            const progress = Math.min(100, (elapsed / reqTime) * 100);
+
+                            // Show Progress on first open hand
+                            const wrist = openHands[0][0];
+                            updateProgress(progress, action === 'start_ai' ? '#00aaff' : '#ff4444', 1.0 - wrist.x, wrist.y);
+
+                            if (elapsed >= reqTime) {
+                                if (action === 'start_ai') AI_MANAGER.connect();
+                                if (action === 'stop_ai') AI_MANAGER.disconnect();
+
+                                GESTURE.palmHold = null;
+                                GESTURE.cooldown = now + 2000;
+                                updateProgress(0);
+                            }
+                        } else {
+                            // Action changed mid-hold
+                            GESTURE.palmHold = null;
+                        }
+                    } else {
+                        GESTURE.palmHold = null;
+                    }
+                } else {
+                    GESTURE.palmHold = null;
+                }
+            } else {
+                GESTURE.palmHold = null;
+            }
+
             // If neither pinch nor pointer is drawing, and not double fist, clear progress
             // If neither pinch nor pointer is drawing, and not double fist, clear progress
             if (!activeAction && !GESTURE.pointer.active && closedCount !== 2) {
@@ -1370,6 +1506,28 @@
             return folders >= 3; // 3 or more fingers folded
         }
 
+        function isHandOpen(landmarks) {
+            // All fingers extended
+            const wrist = landmarks[0];
+            const tips = [8, 12, 16, 20];
+            let extended = 0;
+
+            tips.forEach(idx => {
+                const tip = landmarks[idx];
+                const pip = landmarks[idx - 2];
+                if (Math.hypot(tip.x - wrist.x, tip.y - wrist.y) > Math.hypot(pip.x - wrist.x, pip.y - wrist.y)) {
+                    extended++;
+                }
+            });
+            // Thumb open check
+            const thumbTip = landmarks[4];
+            const thumbMCP = landmarks[2];
+            // Simple distance check or vector check for thumb
+            const thumbOpen = Math.hypot(thumbTip.x - wrist.x, thumbTip.y - wrist.y) > 0.1; // Rough heuristic
+
+            return extended === 4 && thumbOpen;
+        }
+
         // --- 6. MEDIAPIPE SETUP ---
 
         const videoElement = document.getElementById('input-video');
@@ -1394,6 +1552,238 @@
             // Run Logic
             detectGestures(results);
         }
+
+        // --- 7. AUDIO & AI INFRASTRUCTURE ---
+
+        class AudioRecorder {
+            constructor() {
+                this.audioContext = null;
+                this.mediaStream = null;
+                this.workletNode = null;
+                this.onData = null;
+                this.sampleRate = 16000; // Default, updated on start
+            }
+
+            async start(onData) {
+                this.onData = onData;
+                // Use native sample rate to avoid browser resampling issues or failure
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                this.sampleRate = this.audioContext.sampleRate;
+                console.log("Mic Sample Rate:", this.sampleRate);
+
+                this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        // Try to request reasonable settings, but accept whatever browser gives
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+                // Safety Check: If stop() was called while awaiting mic, context might be null
+                if (!this.audioContext) {
+                    console.warn("AudioContext is null after getUserMedia (aborted start?)");
+                    if (this.mediaStream) this.mediaStream.getTracks().forEach(t => t.stop());
+                    return;
+                }
+
+                const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+
+                // Use ScriptProcessor for broader compatibility in this single-file demo
+                // (simpler than loading external AudioWorklet file)
+                this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+
+                this.processor.onaudioprocess = (e) => {
+                    if (!this.onData) return;
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    // Convert Float32 to Int16
+                    const pcmData = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        let s = Math.max(-1, Math.min(1, inputData[i]));
+                        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+
+                    // Safer Binary String (avoid stack overflow)
+                    let binary = '';
+                    const bytes = new Uint8Array(pcmData.buffer);
+                    const len = bytes.byteLength;
+                    for (let i = 0; i < len; i++) {
+                        binary += String.fromCharCode(bytes[i]);
+                    }
+
+                    const base64 = btoa(binary);
+                    // console.log("Mic sending:", base64.length, "bytes"); // Uncomment for spam
+                    this.onData(base64);
+                };
+
+                source.connect(this.processor);
+                this.processor.connect(this.audioContext.destination);
+            }
+
+            stop() {
+                if (this.mediaStream) this.mediaStream.getTracks().forEach(t => t.stop());
+                if (this.audioContext) this.audioContext.close();
+                this.processor = null;
+                this.audioContext = null;
+                this.mediaStream = null;
+            }
+        }
+
+        class AudioStreamer {
+            constructor() {
+                this.audioContext = null;
+                this.isPlaying = false;
+                this.audioQueue = [];
+                this.scheduledTime = 0;
+            }
+
+            init() {
+                // Do NOT force sampleRate here; let browser decide (usually 44100 or 48000)
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            async play(base64Data) {
+                if (!this.audioContext) this.init();
+
+                // Browser Audio Policy: generic 'resume' check
+                if (this.audioContext.state === 'suspended') {
+                    console.log("Resuming audio context...");
+                    try {
+                        await this.audioContext.resume();
+                    } catch (e) {
+                        console.error("Audio resume failed", e);
+                    }
+                }
+
+                const binaryString = atob(base64Data);
+                console.log("AI Audio Chunk Received:", binaryString.length);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                const int16 = new Int16Array(bytes.buffer);
+                const float32 = new Float32Array(int16.length);
+                for (let i = 0; i < int16.length; i++) {
+                    float32[i] = int16[i] / 32768;
+                }
+
+                // Create buffer at 24kHz (Gemini rate). Browser will resample to Context rate.
+                const buffer = this.audioContext.createBuffer(1, float32.length, 24000);
+                buffer.getChannelData(0).set(float32);
+
+                const source = this.audioContext.createBufferSource();
+                source.buffer = buffer;
+                source.connect(this.audioContext.destination);
+
+                const currentTime = this.audioContext.currentTime;
+                if (this.scheduledTime < currentTime) {
+                    this.scheduledTime = currentTime;
+                }
+                source.start(this.scheduledTime);
+                this.scheduledTime += buffer.duration;
+            }
+
+            stop() {
+                if (this.audioContext) {
+                    this.audioContext.close();
+                }
+                this.audioContext = null;
+                this.scheduledTime = 0;
+            }
+        }
+
+        const AI_MANAGER = {
+            isConnected: false,
+            session: null,
+            recorder: new AudioRecorder(),
+            streamer: new AudioStreamer(),
+            apiKey: 'AIzaSyDaTw8htjcOE04ztvZiSD_Wp8X-a4m5NIA', // Injected
+
+            async connect() {
+                if (this.isConnected) return;
+                showFeedback("CONNECTING AI...", "#00aaff");
+
+                const client = new window.GoogleGenAI({ apiKey: this.apiKey });
+
+                const sysInstruction = "You are a helpful shopping assistant for the 'OnlyHands' store. " +
+                    "You have access to the following product list: " + JSON.stringify(DATA.skus) + ". " +
+                    "Be concise, friendly, and helpful. Keep answers short. " +
+                    "IMPORTANT: When the conversation starts, immediately introduce yourself and welcome the user to OnlyHands.";
+
+                try {
+                    this.session = await client.live.connect({
+                        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+                        config: {
+                            responseModalities: [window.Modality.AUDIO],
+                            systemInstruction: sysInstruction,
+                        },
+                        callbacks: {
+                            onopen: () => {
+                                console.log('AI Connected');
+                                this.isConnected = true;
+                                showFeedback("AI LISTENING", "#00ff88");
+                                document.getElementById('ai-status-indicator').classList.add('active');
+                            },
+                            onmessage: (content) => {
+                                if (content.serverContent && content.serverContent.modelTurn && content.serverContent.modelTurn.parts) {
+                                    for (const part of content.serverContent.modelTurn.parts) {
+                                        if (part.inlineData && part.inlineData.data) {
+                                            this.streamer.play(part.inlineData.data);
+                                        }
+                                    }
+                                } else if (content.modelTurn && content.modelTurn.parts) {
+                                    // Handle direct modelTurn if structure varies
+                                    for (const part of content.modelTurn.parts) {
+                                        if (part.inlineData && part.inlineData.data) {
+                                            this.streamer.play(part.inlineData.data);
+                                        }
+                                    }
+                                }
+                            },
+                            onerror: (e) => {
+                                console.error('AI Error:', e);
+                                showFeedback("AI ERROR", "#ff4444");
+                            },
+                            onclose: () => {
+                                console.log('AI Closed');
+                                this.disconnect();
+                            }
+                        }
+                    });
+
+                    // Remove old explicit listeners and manual feedback setting since callbacks handle it
+                    // this.session.on('content', ...) -> Removed
+
+                    await this.recorder.start((base64) => {
+                        this.session.sendRealtimeInput([{
+                            mimeType: `audio/pcm;rate=${this.recorder.sampleRate}`,
+                            data: base64
+                        }]);
+                    });
+
+                } catch (e) {
+                    console.error(e);
+                    showFeedback("CONNECTION FAILED", "#ff4444");
+                    this.isConnected = false;
+                }
+            },
+
+            async disconnect() {
+                if (!this.isConnected) return;
+
+                this.recorder.stop();
+                this.streamer.stop();
+                // Close session if supported or just nullify
+                // this.session.close(); 
+                this.session = null;
+                this.isConnected = false;
+
+                showFeedback("AI Assistant Stopped", "#ff4444");
+                document.getElementById('ai-status-indicator').classList.remove('active');
+            }
+        };
 
         const mpHands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
         mpHands.setOptions({
