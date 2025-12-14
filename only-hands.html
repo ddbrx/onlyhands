@@ -1,0 +1,1415 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OnlyHands</title>
+
+    <!-- Styles: Modern Glassmorphism Shop -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700;800&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Inter', sans-serif;
+            color: white;
+            user-select: none;
+            /* Prevent selection */
+        }
+
+        /* --- Camera Background --- */
+        #output-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0;
+            transform: scaleX(-1);
+            object-fit: cover;
+        }
+
+        /* --- UI Overlay Layer --- */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0.2) 30%, rgba(0, 0, 0, 0.8) 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 40px;
+            box-sizing: border-box;
+            pointer-events: none;
+            /* Let clicks pass through if needed, but we rely on gestures */
+        }
+
+        /* --- Header: Categories (Vertical) --- */
+        header {
+            position: absolute;
+            left: 40px;
+            top: 50%;
+            transform: translateY(-50%);
+            margin: 0;
+            text-align: left;
+            z-index: 20;
+        }
+
+        .category-row {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            font-size: 18px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.4);
+            transform-style: preserve-3d;
+            perspective: 500px;
+        }
+
+        .category-item {
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .category-item.active {
+            color: white;
+            font-weight: 800;
+            transform: scale(1.3) translateX(10px);
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+        }
+
+        .category-item.active::before {
+            content: '';
+            position: absolute;
+            left: -15px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 4px;
+            height: 20px;
+            background: #00ff88;
+            border-radius: 2px;
+        }
+
+        /* --- Swipe Arrows --- */
+        .stage-arrow {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 40px;
+            color: rgba(255, 255, 255, 0.3);
+            animation: pulseArrow 2s infinite;
+        }
+
+        .arrow-left {
+            left: 20px;
+        }
+
+        .arrow-right {
+            right: 20px;
+        }
+
+        @keyframes pulseArrow {
+            0% {
+                opacity: 0.3;
+                transform: translateY(-50%) scale(1);
+            }
+
+            50% {
+                opacity: 0.8;
+                transform: translateY(-50%) scale(1.2);
+            }
+
+            100% {
+                opacity: 0.3;
+                transform: translateY(-50%) scale(1);
+            }
+        }
+
+        /* --- Main: Product Card --- */
+        #product-stage {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        /* Card Container Double Buffer */
+        .card-container {
+            width: 400px;
+            height: 600px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.5s ease;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            /* Base transform for centering is translate(-50%, -50%) */
+        }
+
+        .card-center {
+            transform: translate(-50%, -50%) scale(1);
+            opacity: 1;
+            z-index: 2;
+        }
+
+        .card-left {
+            /* Move left: -50% (center) - 100% (offset) = -150% */
+            transform: translate(-200%, -50%) scale(0.8);
+            opacity: 0;
+            z-index: 1;
+        }
+
+        .card-right {
+            /* Move right: -50% (center) + 100% (offset) = 50% */
+            transform: translate(100%, -50%) scale(0.8);
+            opacity: 0;
+            z-index: 1;
+        }
+
+        .card-hidden {
+            transform: translate(-50%, -50%) scale(0.8);
+            opacity: 0;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .product-img {
+            width: 100%;
+            height: 350px;
+            object-fit: contain;
+            margin-bottom: 20px;
+            filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.3));
+        }
+
+        .product-info {
+            text-align: center;
+            color: white;
+        }
+
+        .product-title {
+            font-weight: 700;
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+
+        .product-desc {
+            font-size: 14px;
+            color: #aaa;
+            margin-bottom: 16px;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .product-price {
+            font-size: 24px;
+            font-weight: 300;
+            color: #00ff88;
+        }
+
+        /* --- Footer: Basket & Status --- */
+        footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            padding-bottom: 20px;
+        }
+
+        #basket-panel {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 15px 25px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .basket-count {
+            font-size: 14px;
+            color: #bbb;
+            margin-bottom: 5px;
+        }
+
+        .basket-total {
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        #gesture-hint {
+            text-align: right;
+            font-size: 14px;
+            color: #888;
+            line-height: 1.6;
+        }
+
+        #gesture-icon {
+            font-size: 24px;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+
+        /* --- Interact Feedback Overlay --- */
+        #feedback-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 20;
+            font-size: 48px;
+            font-weight: 900;
+            color: white;
+            text-shadow: 0 0 30px rgba(0, 255, 136, 0.8);
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            text-align: center;
+        }
+
+        /* Hold Progress Ring */
+        #hold-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            transform: translate(-50%, -50%);
+            /* Centered on the point */
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+
+            /* Ring shape using mask */
+            -webkit-mask: radial-gradient(transparent 54%, black 56%);
+            mask: radial-gradient(transparent 54%, black 56%);
+
+            /* Default background (track) */
+            background: rgba(255, 255, 255, 0.1);
+
+            opacity: 0;
+            z-index: 19;
+            transition: opacity 0.2s;
+            pointer-events: none;
+        }
+
+        /* Carousel Dots */
+        #carousel-dots {
+            position: absolute;
+            bottom: 80px;
+            /* Positioned below card */
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 12px;
+            z-index: 20;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .dot.active {
+            background: #00ff88;
+            transform: scale(1.4);
+            box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        }
+
+        /* Modal for Order Success */
+        #success-modal,
+        #review-modal {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            /* Darker */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+
+        #success-modal.show,
+        #review-modal.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .success-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        /* Review List */
+        #review-list {
+            width: 300px;
+            max-height: 400px;
+            overflow-y: auto;
+            text-align: left;
+            margin-bottom: 20px;
+        }
+
+        .review-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ccc;
+        }
+
+        .review-total {
+            font-size: 24px;
+            font-weight: 700;
+            color: #00ff88;
+            margin-bottom: 30px;
+        }
+
+        .modal-hint {
+            color: #888;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        @keyframes popIn {
+            0% {
+                transform: scale(0);
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        /* --- Hand Skeleton CSS --- */
+        /* We rely on canvas drawing but can add some helper classes if needed */
+
+        /* --- Loading Overlay --- */
+        #loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            z-index: 200;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        #loading-overlay.show {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: #00ff88;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Video Input (Hidden) -->
+    <video id="input-video" style="display:none"></video>
+
+    <!-- Camera Canvas -->
+    <canvas id="output-canvas"></canvas>
+
+    <!-- Feedback Text -->
+    <div id="feedback-overlay">ADDED TO BASKET!</div>
+    <div id="hold-progress"></div>
+
+    <!-- Success Modal -->
+    <div id="success-modal">
+        <div class="success-icon">🎉</div>
+        <h1 style="font-size: 40px; margin: 0;">Order Submitted!</h1>
+        <p style="color: #bbb; margin-top: 10px;">Thank you for shopping with OnlyHands.</p>
+    </div>
+
+    <!-- Review Modal -->
+    <div id="review-modal">
+        <h2 style="margin-bottom: 20px;">Review Your Order</h2>
+        <div id="review-list">
+            <!-- Items go here -->
+        </div>
+        <div class="review-total" id="review-total">Total: £0.00</div>
+
+        <div class="modal-hint"> 👌 Pinch to Confirm</div>
+        <div class="modal-hint"> 👎 Thumb Down to Go Back</div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Main UI -->
+    <div id="ui-layer">
+        <header>
+            <div id="category-container" class="category-row">
+                <!-- Dynamically populated -->
+            </div>
+        </header>
+
+        <div id="product-stage">
+            <!-- Arrows -->
+            <div class="stage-arrow arrow-left">‹</div>
+            <div class="stage-arrow arrow-right">›</div>
+
+            <div id="card-1" class="card-container card-active">
+                <img class="product-img" src="">
+                <div class="product-info">
+                    <div class="product-title"></div>
+                    <div class="product-desc"></div>
+                    <div class="product-price"></div>
+                </div>
+            </div>
+
+            <div id="card-2" class="card-container card-hidden">
+                <img class="product-img" src="">
+                <div class="product-info">
+                    <div class="product-title"></div>
+                    <div class="product-desc"></div>
+                    <div class="product-price"></div>
+                </div>
+            </div>
+
+            <div id="carousel-dots"></div>
+        </div>
+
+        <footer>
+            <div id="basket-panel">
+                <div class="basket-count">Basket (<span id="b-count">0</span> items)</div>
+                <div class="basket-total" id="b-total">£0.00</div>
+            </div>
+
+            <div id="gesture-hint">
+                👋 Swipe Left/Right to Browse<br>
+                👇👆 Point Up/Down (Hold) to Change Category<br>
+                👍👎 Thumb Up/Down (Hold) for Basket Add / Remove<br>
+                👌 OK Sign (Pinch) (Hold) to Review / Submit<br>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Libs -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+    <script>
+        // --- 1. DATA & STATE ---
+        const DATA = {
+            "categories": [
+                { "name": "Phones", "priority": 1 },
+                { "name": "Earbuds", "priority": 2 },
+                { "name": "Watches", "priority": 3 }
+            ],
+            "skus": [
+                {
+                    "model": "SK-P10",
+                    "title": "Nothing Phone (2)",
+                    "description": "Nothing Phone (2) - 256 GB + 12 GB Ram...",
+                    "category": "Phones",
+                    "price": { "price": 629, "currency": "GBP" },
+                    "image_url": "https://m.media-amazon.com/images/I/71hsuRTQ29L._AC_SL1500_.jpg"
+                },
+                {
+                    "model": "SK-P11",
+                    "title": "Nothing Phone (2a)",
+                    "description": "Nothing Phone (2a) 12+256GB...",
+                    "category": "Phones",
+                    "price": { "price": 299, "currency": "GBP" },
+                    "image_url": "https://m.media-amazon.com/images/I/61oycK5i7qL._AC_SL1090_.jpg"
+                },
+                {
+                    "model": "SK-P12",
+                    "title": "Nothing Phone (2a) plus",
+                    "description": "Nothing Phone (2a) Plus 12+256GB...",
+                    "category": "Phones",
+                    "price": { "price": 349, "currency": "GBP" },
+                    "image_url": "https://m.media-amazon.com/images/I/81wCjPXM7lL._AC_SL1500_.jpg"
+                },
+                {
+                    "model": "SK-P20",
+                    "title": "Nothing CMF Phone 1",
+                    "description": "CMF Phone 1 8+128GB...",
+                    "category": "Phones",
+                    "price": { "price": 209, "currency": "GBP" },
+                    "image_url": "https://m.media-amazon.com/images/I/71v-zYqZVhL._AC_SL1500_.jpg"
+                },
+                {
+                    "model": "SK-E10",
+                    "title": "Nothing Ear",
+                    "description": "Nothing Ear wireless ear buds...",
+                    "category": "Earbuds",
+                    "price": { "price": 79, "currency": "GBP" },
+                    "image_url": "https://m.media-amazon.com/images/I/61zbdfSf6BL._AC_SL1000_.jpg"
+                },
+                {
+                    "model": "SK-E11",
+                    "title": "Nothing Ear (a)",
+                    "description": "Nothing Ear (a) wireless ear buds...",
+                    "category": "Earbuds",
+                    "price": { "price": 79, "currency": "GBP" },
+                    "image_url": "https://m.media-amazon.com/images/I/71oK0nwUZML._AC_SL1500_.jpg"
+                },
+                {
+                    "model": "SK-E12",
+                    "title": "Nothing Ear (open)",
+                    "description": "Nothing Ear (open) wireless open headphones...",
+                    "category": "Earbuds",
+                    "price": { "price": 79, "currency": "GBP" },
+                    "image_url": "https://m.media-amazon.com/images/I/71uMXhoc5SL._AC_SL1500_.jpg"
+                },
+                {
+                    "model": "SK-E20",
+                    "title": "Nothing CMF Buds Pro 2",
+                    "description": "CMF by Nothing Buds Pro 2...",
+                    "category": "Earbuds",
+                    "price": { "price": 59, "currency": "GBP" },
+                    "image_url": "https://m.media-amazon.com/images/I/71Y9-4usNCL._AC_SL1500_.jpg"
+                },
+                {
+                    "model": "SK-W10",
+                    "title": "Nothing CMF Watch Pro 2",
+                    "description": "CMF by Nothing Watch Pro 2...",
+                    "category": "Watches",
+                    "price": { "price": 69, "currency": "GBP" },
+                    "image_url": "https://m.media-amazon.com/images/I/51XDLXY0QWL._AC_SL1500_.jpg"
+                }
+            ]
+        };
+
+        const STATE = {
+            catIdx: 0,
+            prodIdx: 0,
+            basket: [],
+            isAnimating: false,
+            bgCanvas: null,
+            bgCtx: null,
+            lastGestureTime: 0,
+            activeCardIdx: 0,
+            mode: 'browsing' // browsing, review
+        };
+
+        // Pre-process data: Group SKUs by Category
+        const STORE_DATA = DATA.categories.map(c => {
+            return {
+                name: c.name,
+                products: DATA.skus.filter(s => s.category === c.name)
+            };
+        });
+
+        // --- 2. DOM ELEMENTS ---
+        const els = {
+            catContainer: document.getElementById('category-container'),
+            cards: [
+                {
+                    wrap: document.getElementById('card-1'),
+                    img: document.querySelector('#card-1 .product-img'),
+                    title: document.querySelector('#card-1 .product-title'),
+                    desc: document.querySelector('#card-1 .product-desc'),
+                    price: document.querySelector('#card-1 .product-price')
+                },
+                {
+                    wrap: document.getElementById('card-2'),
+                    img: document.querySelector('#card-2 .product-img'),
+                    title: document.querySelector('#card-2 .product-title'),
+                    desc: document.querySelector('#card-2 .product-desc'),
+                    price: document.querySelector('#card-2 .product-price')
+                }
+            ],
+            bCount: document.getElementById('b-count'),
+            bTotal: document.getElementById('b-total'),
+            feedback: document.getElementById('feedback-overlay'),
+            successModal: document.getElementById('success-modal'),
+            reviewModal: document.getElementById('review-modal'),
+            reviewList: document.getElementById('review-list'),
+            reviewTotal: document.getElementById('review-total'),
+            dotsContainer: document.getElementById('carousel-dots'),
+            loadingOverlay: document.getElementById('loading-overlay')
+        };
+
+        // --- 3. UI RENDER FUNCTIONS ---
+
+        function renderDots() {
+            const currentCat = STORE_DATA[STATE.catIdx];
+            const total = currentCat.products.length;
+
+            els.dotsContainer.innerHTML = '';
+            for (let i = 0; i < total; i++) {
+                const dot = document.createElement('div');
+                dot.className = `dot ${i === STATE.prodIdx ? 'active' : ''}`;
+                els.dotsContainer.appendChild(dot);
+            }
+        }
+
+        function renderCategories() {
+            els.catContainer.innerHTML = '';
+            STORE_DATA.forEach((cat, idx) => {
+                const div = document.createElement('div');
+                div.className = `category-item ${idx === STATE.catIdx ? 'active' : ''}`;
+                div.innerText = cat.name;
+                els.catContainer.appendChild(div);
+            });
+            renderDots(); // Re-render dots when category changes (count might change)
+        }
+
+        // Initial Render
+        function init() {
+            renderCategories();
+            // Render initial product into active card
+            STATE.activeCardIdx = 0;
+            const card = els.cards[0];
+            const currentCat = STORE_DATA[STATE.catIdx];
+            const currentProd = currentCat.products[STATE.prodIdx];
+
+            card.img.src = currentProd.image_url;
+            card.title.innerText = currentProd.title;
+            card.desc.innerText = currentProd.description;
+            card.price.innerText = `£${currentProd.price.price}`;
+
+            // Reset Classes
+            els.cards[0].wrap.className = 'card-container card-center';
+            els.cards[1].wrap.className = 'card-container card-hidden';
+
+            renderDots();
+            updateBasketUI();
+
+            // Start Loop if needed or just wait for events
+        }
+
+        function renderDots() {
+            const cat = STORE_DATA[STATE.catIdx];
+            const count = cat.products.length;
+            const container = document.getElementById('carousel-dots');
+            container.innerHTML = '';
+            for (let i = 0; i < count; i++) {
+                const dot = document.createElement('div');
+                dot.className = `dot ${i === STATE.prodIdx ? 'active' : ''}`;
+                container.appendChild(dot);
+            }
+        }
+
+        function renderProduct(direction = null) {
+            renderDots(); // Update active dot
+
+            // Identify Active and Next cards
+            const currentIdx = STATE.activeCardIdx;
+            const nextIdx = (currentIdx + 1) % 2;
+
+            const activeCard = els.cards[currentIdx];
+            const nextCard = els.cards[nextIdx];
+
+            const currentCat = STORE_DATA[STATE.catIdx];
+            const nextProd = currentCat.products[STATE.prodIdx];
+
+            // 1. Prepare Next Card Data
+            nextCard.img.src = nextProd.image_url;
+            nextCard.title.innerText = nextProd.title;
+            nextCard.desc.innerText = nextProd.description;
+            nextCard.price.innerText = `£${nextProd.price.price}`;
+
+            // 2. Position Next Card (Start State)
+            // Remove transition temporarily to snap to start position
+            nextCard.wrap.style.transition = 'none';
+            if (direction === 'left') {
+                // Next item coming from right
+                nextCard.wrap.className = 'card-container card-right';
+            } else if (direction === 'right') {
+                // Prev item coming from left
+                nextCard.wrap.className = 'card-container card-left';
+            } else {
+                // Default / Jump (e.g. Category Change) - maybe fade or just pop
+                nextCard.wrap.className = 'card-container card-hidden';
+            }
+
+            // Force Reflow
+            void nextCard.wrap.offsetWidth;
+
+            // Restore Transition
+            nextCard.wrap.style.transition = '';
+            activeCard.wrap.style.transition = '';
+
+            // 3. Animate
+            requestAnimationFrame(() => {
+                // Move Active Out
+                if (direction === 'left') {
+                    activeCard.wrap.className = 'card-container card-left'; // Move to left
+                    nextCard.wrap.className = 'card-container card-center'; // Move to center
+                } else if (direction === 'right') {
+                    activeCard.wrap.className = 'card-container card-right'; // Move to right
+                    nextCard.wrap.className = 'card-container card-center'; // Move to center
+                } else {
+                    // Instant swap or fade if we add fade logic. Let's just swap for vertical/jump
+                    activeCard.wrap.className = 'card-container card-hidden';
+                    nextCard.wrap.className = 'card-container card-center';
+                }
+
+                STATE.activeCardIdx = nextIdx;
+                STATE.isAnimating = true;
+
+                setTimeout(() => {
+                    STATE.isAnimating = false;
+                }, 500); // 500ms match CSS transition
+            });
+        }
+
+        function updateBasketUI() {
+            const total = STATE.basket.reduce((acc, curr) => acc + curr.price.price, 0);
+            els.bCount.innerText = STATE.basket.length;
+            els.bTotal.innerText = `£${total.toFixed(2)}`;
+        }
+
+        function showFeedback(text, color = '#00ff88') {
+            els.feedback.innerText = text;
+            els.feedback.style.color = color;
+            els.feedback.textShadow = `0 0 30px ${color}`;
+            els.feedback.style.opacity = 1;
+            els.feedback.style.transform = 'translate(-50%, -50%) scale(1.2)';
+
+            setTimeout(() => {
+                els.feedback.style.opacity = 0;
+                els.feedback.style.transform = 'translate(-50%, -50%) scale(1)';
+            }, 1500);
+        }
+
+        // Initialize UI
+        renderCategories();
+        renderProduct();
+
+        // --- 4. LOGIC: ACTIONS ---
+
+        function nextProduct() {
+            if (STATE.isAnimating || STATE.mode !== 'browsing') return;
+            const cat = STORE_DATA[STATE.catIdx];
+            if (STATE.prodIdx < cat.products.length - 1) {
+                STATE.isAnimating = true;
+                STATE.prodIdx++;
+                renderProduct('left');
+            } else {
+                // Next Category, First Product
+                STATE.isAnimating = true;
+                STATE.catIdx = (STATE.catIdx + 1) % STORE_DATA.length;
+                STATE.prodIdx = 0;
+                renderCategories();
+                renderProduct('right'); // Slide in from right (as if moving forward)
+            }
+        }
+
+        function prevProduct() {
+            if (STATE.isAnimating || STATE.mode !== 'browsing') return;
+            if (STATE.prodIdx > 0) {
+                STATE.isAnimating = true;
+                STATE.prodIdx--;
+                renderProduct('right');
+            } else {
+                // Prev Category, Last Product
+                STATE.isAnimating = true;
+                STATE.catIdx = (STATE.catIdx - 1 + STORE_DATA.length) % STORE_DATA.length;
+                const prevCat = STORE_DATA[STATE.catIdx];
+                STATE.prodIdx = prevCat.products.length - 1;
+                renderCategories();
+                renderProduct('left'); // Slide in from left (as if moving back)
+            }
+        }
+
+        function nextCategory() {
+            if (STATE.isAnimating || STATE.mode !== 'browsing') return;
+            STATE.isAnimating = true;
+            STATE.catIdx = (STATE.catIdx + 1) % STORE_DATA.length;
+            STATE.prodIdx = 0; // Reset product index
+            renderCategories();
+            renderProduct('down');
+        }
+
+        function prevCategory() {
+            if (STATE.isAnimating || STATE.mode !== 'browsing') return;
+            STATE.isAnimating = true;
+            STATE.catIdx = (STATE.catIdx - 1 + STORE_DATA.length) % STORE_DATA.length;
+            STATE.prodIdx = 0;
+            renderCategories();
+            renderProduct('up');
+        }
+
+        function addToBasket() {
+            if (STATE.mode !== 'browsing') return;
+            const cat = STORE_DATA[STATE.catIdx];
+            const prod = cat.products[STATE.prodIdx];
+            STATE.basket.push(prod);
+            updateBasketUI();
+            showFeedback("ADDED +1");
+        }
+
+        function openReviewModal() {
+            if (STATE.basket.length === 0) {
+                showFeedback("BASKET EMPTY", "#ff4444");
+                return;
+            }
+
+            STATE.mode = 'review';
+
+            // Populate List
+            els.reviewList.innerHTML = '';
+            let total = 0;
+            STATE.basket.forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'review-item';
+                row.innerHTML = `<span>${item.title.substring(0, 20)}...</span><span>£${item.price.price}</span>`;
+                els.reviewList.appendChild(row);
+                total += item.price.price;
+            });
+            els.reviewTotal.innerText = `Total: £${total.toFixed(2)}`;
+
+            els.reviewModal.classList.add('show');
+        }
+
+        function closeReviewModal() {
+            STATE.mode = 'browsing';
+            els.reviewModal.classList.remove('show');
+        }
+
+        function submitOrder() {
+            els.reviewModal.classList.remove('show');
+
+            // Start Loading
+            els.loadingOverlay.classList.add('show');
+            STATE.isAnimating = true;
+
+            setTimeout(() => {
+                els.loadingOverlay.classList.remove('show');
+                STATE.isAnimating = false;
+
+                els.successModal.classList.add('show');
+                setTimeout(() => {
+                    STATE.basket = [];
+                    updateBasketUI();
+                    els.successModal.classList.remove('show');
+                    STATE.mode = 'browsing';
+                }, 3000);
+            }, 1000);
+        }
+
+        // --- 5. GESTURE RECOGNITION (MediaPipe) ---
+
+        function removeFromBasket() {
+            if (STATE.mode !== 'browsing') return;
+            if (STATE.basket.length > 0) {
+                STATE.basket.pop();
+                updateBasketUI();
+                showFeedback("REMOVED -1", "#ff4444");
+            }
+        }
+
+        // State for gestures
+        const GESTURE = {
+            slideWindow: [],
+            windowSize: 8,
+            cooldown: 0,
+
+            // Separate Grab States
+            thumbDown: { active: false, startTime: 0 },
+            thumbUp: { active: false, startTime: 0 },
+            right: { isPinching: false, startTime: 0 },
+
+            // Pointer State
+            pointer: { active: false, direction: null, startTime: 0 },
+
+            requiredHoldTime: 1000,
+            doubleGrabFrameCount: 0
+        };
+
+        const els_uxtra = {
+            progress: document.getElementById('hold-progress')
+        };
+
+        function updateProgress(percent, color = '#00ff88', x = 0.5, y = 0.5) {
+            if (percent <= 0) {
+                els_uxtra.progress.style.opacity = 0;
+                return;
+            }
+            els_uxtra.progress.style.opacity = 1;
+            els_uxtra.progress.style.background = `conic-gradient(${color} ${percent}%, rgba(255, 255, 255, 0.1) 0)`;
+
+            // Update Position
+            // x, y are normalized 0-1
+            els_uxtra.progress.style.left = `${x * 100}%`;
+            els_uxtra.progress.style.top = `${y * 100}%`;
+        }
+
+        function detectGestures(results) {
+            const now = Date.now();
+            if (now < GESTURE.cooldown) {
+                updateProgress(0);
+                return;
+            }
+
+            const hands = results.multiHandLandmarks;
+            const handedness = results.multiHandedness;
+
+            if (!hands || hands.length === 0 || !handedness) {
+                GESTURE.right.isPinching = false;
+                GESTURE.thumbDown.active = false;
+                updateProgress(0);
+                GESTURE.slideWindow = [];
+                return;
+            }
+
+            // Map hands to Left vs Right based on Label
+            // Note: MediaPipe Label 'Left' usually means physical Left hand.
+            let rightHand = null;
+            let leftHand = null;
+
+            hands.forEach((landmarks, index) => {
+                const label = handedness[index].label;
+                // Fix for mirroring: Swap labels
+                // MediaPipe 'Left' matches 'Right' in our mirrored UI logic
+                if (label === 'Right') leftHand = landmarks;
+                if (label === 'Left') rightHand = landmarks;
+            });
+
+            // --- 1. PRE-CALC STATE ---
+            let closedCount = 0;
+            hands.forEach(h => { if (isHandClosed(h)) closedCount++; });
+
+            let activeAction = false; // Track if any action is claiming the progress ring
+
+            // --- A. THUMB UP -> ADD TO BASKET ---
+            // Check all hands
+            let thumbUpHand = null;
+            hands.forEach(h => { if (isThumbUp(h)) thumbUpHand = h; });
+
+            if (thumbUpHand && !activeAction) {
+                if (!GESTURE.thumbUp.active) {
+                    GESTURE.thumbUp.active = true;
+                    GESTURE.thumbUp.startTime = now;
+                } else {
+                    activeAction = true;
+                    const elapsed = now - GESTURE.thumbUp.startTime;
+                    const progress = Math.min(100, (elapsed / GESTURE.requiredHoldTime) * 100);
+
+                    const thumbTip = thumbUpHand[4];
+                    // Add = Green
+                    updateProgress(progress, '#00ff88', 1.0 - thumbTip.x, thumbTip.y);
+
+                    if (elapsed >= GESTURE.requiredHoldTime) {
+                        if (STATE.mode === 'browsing') addToBasket();
+
+                        GESTURE.thumbUp.active = false;
+                        GESTURE.thumbUp.startTime = 0;
+                        GESTURE.cooldown = now + 1000;
+                        updateProgress(0);
+                    }
+                }
+            } else {
+                GESTURE.thumbUp.active = false;
+            }
+
+            // --- B. OK / PINCH -> REVIEW / SUBMIT ---
+            // "OK" Gesture is essentially a Pinch (Index+Thumb touches)
+            // Priority: Thumb Up (Add) > OK (Review) > Thumb Down (Remove)
+
+            let okHand = null;
+            // Check right hand first, then left (or just any hand pinching)
+            if (rightHand && isPinch(rightHand)) okHand = rightHand;
+            else if (leftHand && isPinch(leftHand)) okHand = leftHand;
+
+            if (okHand && !activeAction) {
+                if (!GESTURE.right.isPinching) {
+                    GESTURE.right.isPinching = true;
+                    GESTURE.right.startTime = now;
+                } else {
+                    activeAction = true;
+                    const elapsed = now - GESTURE.right.startTime;
+                    const progress = Math.min(100, (elapsed / GESTURE.requiredHoldTime) * 100);
+
+                    const idxTip = okHand[8];
+                    // Review = Green
+                    updateProgress(progress, '#00ff88', 1.0 - idxTip.x, idxTip.y);
+
+                    if (elapsed >= GESTURE.requiredHoldTime) {
+                        if (STATE.mode === 'browsing') openReviewModal();
+                        else if (STATE.mode === 'review') submitOrder();
+
+                        GESTURE.right.isPinching = false;
+                        GESTURE.right.startTime = 0;
+                        GESTURE.cooldown = now + 1000;
+                        updateProgress(0);
+                    }
+                }
+            } else {
+                GESTURE.right.isPinching = false;
+            }
+
+            // --- C. THUMB DOWN -> REMOVE / BACK ---
+            let thumbDownHand = null;
+            if (hands.length > 0) {
+                for (let i = 0; i < hands.length; i++) {
+                    if (isThumbDown(hands[i])) {
+                        thumbDownHand = hands[i];
+                        break;
+                    }
+                }
+            }
+
+            if (thumbDownHand && !activeAction && closedCount !== 2) {
+                if (!GESTURE.thumbDown.active) {
+                    GESTURE.thumbDown.active = true;
+                    GESTURE.thumbDown.startTime = now;
+                } else {
+                    activeAction = true;
+                    const elapsed = now - GESTURE.thumbDown.startTime;
+                    const progress = Math.min(100, (elapsed / GESTURE.requiredHoldTime) * 100);
+
+                    const thumbTip = thumbDownHand[4];
+                    updateProgress(progress, '#ff4444', 1.0 - thumbTip.x, thumbTip.y);
+
+                    if (elapsed >= GESTURE.requiredHoldTime) {
+                        if (STATE.mode === 'browsing') removeFromBasket();
+                        else if (STATE.mode === 'review') closeReviewModal();
+
+                        GESTURE.thumbDown.active = false;
+                        GESTURE.thumbDown.startTime = 0;
+                        GESTURE.cooldown = now + 1000;
+                        updateProgress(0);
+                    }
+                }
+            } else {
+                GESTURE.thumbDown.active = false;
+            }
+
+            if (!activeAction && !GESTURE.pointer.active) updateProgress(0);
+
+
+            // --- 3. POINTER HOLD (Up/Down) ---
+            // Check primary hand (assume Right usually, or just ANY hand that is pointing)
+            let pointingHand = null;
+            let pointDir = null; // 'up' or 'down'
+
+            // Check all hands for pointing
+            if (hands.length > 0) {
+                // Prioritize the first hand found pointing
+                for (let i = 0; i < hands.length; i++) {
+                    const p = isPointing(hands[i]);
+                    if (p.isPointing) {
+                        pointingHand = hands[i];
+                        pointDir = p.direction;
+                        break;
+                    }
+                }
+            }
+
+            if (!activeAction && pointingHand && pointDir) {
+                // If we are pointing, track it
+                if (!GESTURE.pointer.active || GESTURE.pointer.direction !== pointDir) {
+                    // New point action
+                    GESTURE.pointer.active = true;
+                    GESTURE.pointer.direction = pointDir;
+                    GESTURE.pointer.startTime = now;
+                } else {
+                    // Continuing point
+                    const elapsed = now - GESTURE.pointer.startTime;
+                    const progress = Math.min(100, (elapsed / GESTURE.requiredHoldTime) * 100);
+
+                    // Visual feedback at Index Tip
+                    const idxTip = pointingHand[8];
+                    const color = pointDir === 'up' ? '#ffaa00' : '#00aaff'; // Different colors for Up/Down? Or just Green? Let's use Green.
+                    updateProgress(progress, '#00ff88', 1.0 - idxTip.x, idxTip.y);
+
+                    if (elapsed >= GESTURE.requiredHoldTime) {
+                        if (STATE.mode === 'browsing') {
+                            if (pointDir === 'up') prevCategory();
+                            if (pointDir === 'down') nextCategory();
+                        } else if (STATE.mode === 'review') {
+                            if (pointDir === 'down') closeReviewModal();
+                        }
+
+                        GESTURE.pointer.active = false;
+                        GESTURE.pointer.startTime = 0;
+                        GESTURE.cooldown = now + 1000;
+                        updateProgress(0);
+                    }
+                }
+            } else {
+                // Not pointing or interrupted
+                GESTURE.pointer.active = false;
+                GESTURE.pointer.startTime = 0;
+                if (!activeAction && closedCount !== 2) {
+                    // Only clear if not doing other gestures
+                    // updateProgress(0); // Handled at bottom if nothing else active? 
+                    // Careful not to clear Pinch progress. 
+                    // We can rely on 'activeAction' flag above to know if pinch is drawing.
+                }
+            }
+
+            // If neither pinch nor pointer is drawing, and not double fist, clear progress
+            // If neither pinch nor pointer is drawing, and not double fist, clear progress
+            if (!activeAction && !GESTURE.pointer.active && closedCount !== 2) {
+                updateProgress(0);
+            }
+
+            // --- 4. SWIPE (Horizontal Only) ---
+            if (!activeAction && !GESTURE.pointer.active && closedCount === 0 && hands.length > 0) {
+                // Use Primary Hand (Index 0) for navigation
+                const wrist = hands[0][0];
+                GESTURE.slideWindow.push({ x: wrist.x, y: wrist.y, t: now });
+
+                if (GESTURE.slideWindow.length > GESTURE.windowSize) GESTURE.slideWindow.shift();
+
+                if (GESTURE.slideWindow.length >= 4) {
+                    const first = GESTURE.slideWindow[0];
+                    const last = GESTURE.slideWindow[GESTURE.slideWindow.length - 1];
+                    const dt = last.t - first.t;
+
+                    if (dt > 0 && dt < 1000) { // Time window check
+                        const dx = last.x - first.x;
+                        const dy = last.y - first.y;
+                        const vx = dx / dt;
+                        const VEL_THRESH = 0.0003; // Lower threshold (slower swipes ok)
+                        const MIN_DIST = 0.10; // 10% of view (easier to trigger)
+
+                        // Relaxed Horizontal Check:
+                        // 1. Min Distance travelled (reduced)
+                        // 2. Velocity high enough (reduced)
+                        // 3. Horizontal movement > Vertical movement * 1.2 (forgiving diagonal)
+
+                        if (Math.abs(dx) > MIN_DIST &&
+                            Math.abs(vx) > VEL_THRESH &&
+                            Math.abs(dx) > Math.abs(dy) * 1.2) {
+
+                            if (STATE.mode === 'browsing') {
+                                if (vx > 0) prevProduct();
+                                else nextProduct();
+                            }
+                            GESTURE.cooldown = now + 600;
+                            GESTURE.slideWindow = [];
+                        }
+                    }
+                }
+            } else {
+                GESTURE.slideWindow = [];
+            }
+        }
+
+        function isPointing(landmarks) {
+            // Index (8) extended, others curled.
+            // Thumb (4) can be loose.
+            const wrist = landmarks[0];
+            const fingers = [12, 16, 20]; // Middle, Ring, Pinky
+            const indexTip = landmarks[8];
+            const indexPip = landmarks[6]; // PIP is 6, MCP is 5
+
+            // 1. Check Index Extended
+            // Distance Tip-Wrist > Distance PIP-Wrist
+            const dIndexTip = Math.hypot(indexTip.x - wrist.x, indexTip.y - wrist.y);
+            const dIndexPip = Math.hypot(indexPip.x - wrist.x, indexPip.y - wrist.y);
+            if (dIndexTip < dIndexPip * 1.2) return { isPointing: false }; // Not extended enough
+
+            // 2. Check Others Curled
+            for (let idx of fingers) {
+                const tip = landmarks[idx];
+                const pip = landmarks[idx - 2];
+                const dTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                const dPip = Math.hypot(pip.x - wrist.x, pip.y - wrist.y);
+                // If tip is further than PIP, it's open.
+                if (dTip > dPip) return { isPointing: false };
+            }
+
+            // 3. Determine Direction (Up/Down) based on Tip vs Wrist Y
+            // Y increases downwards.
+            // Up: Tip Y < Wrist Y
+            // Down: Tip Y > Wrist Y
+            const isUp = indexTip.y < wrist.y;
+            return { isPointing: true, direction: isUp ? 'up' : 'down' };
+        }
+
+        function isThumbDown(landmarks) {
+            // Fist mostly closed + Thumb Down
+            // 1. Fingers Closed
+            const wrist = landmarks[0];
+            const fingerTips = [8, 12, 16, 20];
+            let allClosed = true;
+            for (let idx of fingerTips) {
+                const tip = landmarks[idx];
+                const pip = landmarks[idx - 2];
+                if (Math.hypot(tip.x - wrist.x, tip.y - wrist.y) > Math.hypot(pip.x - wrist.x, pip.y - wrist.y)) {
+                    allClosed = false;
+                    break;
+                }
+            }
+            if (!allClosed) return false;
+
+            // 2. Thumb Extended & Down
+            const thumbTip = landmarks[4];
+            const thumbIP = landmarks[3];
+            const thumbMCP = landmarks[2];
+
+            // Check Thumb Extension (Tip further from MCP than IP from MCP)
+            // Or just check Tip Y > IP Y > MCP Y (Vertical Down)
+            const isPointingDown = (thumbTip.y > thumbIP.y) && (thumbIP.y > thumbMCP.y);
+
+            // Should be below wrist too, usually
+            const belowWrist = thumbTip.y > wrist.y;
+
+            return isPointingDown && belowWrist;
+        }
+
+        function isThumbUp(landmarks) {
+            // 1. Fingers Closed (reuse existing logic from isThumbDown essentially)
+            const wrist = landmarks[0];
+            const fingerTips = [8, 12, 16, 20];
+            let allClosed = true;
+            for (let idx of fingerTips) {
+                const tip = landmarks[idx];
+                const pip = landmarks[idx - 2];
+                // Distance check logic same as isThumbDown
+                if (Math.hypot(tip.x - wrist.x, tip.y - wrist.y) > Math.hypot(pip.x - wrist.x, pip.y - wrist.y)) {
+                    allClosed = false;
+                    break;
+                }
+            }
+            if (!allClosed) return false;
+
+            // 2. Thumb Extended & UP
+            const thumbTip = landmarks[4];
+            const thumbIP = landmarks[3];
+            const thumbMCP = landmarks[2];
+
+            // Up: Tip Y < IP Y < MCP Y
+            const isPointingUp = (thumbTip.y < thumbIP.y) && (thumbIP.y < thumbMCP.y);
+            const aboveWrist = thumbTip.y < wrist.y;
+
+            return isPointingUp && aboveWrist;
+        }
+
+        function isPinch(landmarks) {
+            // Thumb Tip (4) and Index Tip (8)
+            const thumbTip = landmarks[4];
+            const indexTip = landmarks[8];
+            const distance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+            return distance < 0.05; // Threshold for pinch
+        }
+
+        function isHandClosed(landmarks) {
+            // Check fingers: Index(8), Middle(12), Ring(16), Pinky(20)
+            // If tips are lower (higher Y value) than their PIP joints, roughly closed.
+            // Or Distance check.
+
+            const wrist = landmarks[0];
+            const tips = [8, 12, 16, 20];
+
+            let folders = 0;
+            tips.forEach(idx => {
+                const tip = landmarks[idx];
+                const pip = landmarks[idx - 2];
+                // Distance to wrist
+                const distTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                const distPip = Math.hypot(pip.x - wrist.x, pip.y - wrist.y);
+                if (distTip < distPip) folders++;
+            });
+
+            return folders >= 3; // 3 or more fingers folded
+        }
+
+        // --- 6. MEDIAPIPE SETUP ---
+
+        const videoElement = document.getElementById('input-video');
+        const outputCanvas = document.getElementById('output-canvas');
+        const canvasCtx = outputCanvas.getContext('2d');
+
+        function onResults(results) {
+            // Draw Camera
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+            canvasCtx.drawImage(results.image, 0, 0, outputCanvas.width, outputCanvas.height);
+
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS,
+                        { color: 'rgba(0,255,136,0.5)', lineWidth: 3 });
+                    drawLandmarks(canvasCtx, landmarks, { color: 'rgba(255,255,255,0.8)', lineWidth: 1 });
+                }
+            }
+            canvasCtx.restore();
+
+            // Run Logic
+            detectGestures(results);
+        }
+
+        const mpHands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        mpHands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        mpHands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await mpHands.send({ image: videoElement });
+            },
+            width: 1280,
+            height: 720
+        });
+
+        camera.start();
+
+        // Resize handler
+        function resize() {
+            outputCanvas.width = window.innerWidth;
+            outputCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+    </script>
+</body>
+
+</html>
