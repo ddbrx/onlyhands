@@ -254,8 +254,8 @@
 
         #gesture-hint {
             text-align: right;
-            font-size: 24px;
-            color: #f0f0f0;
+            font-size: 14px;
+            color: #888;
             line-height: 1.6;
         }
 
@@ -575,7 +575,7 @@
                 👆👇 Point Up/Down (Hold) to Change Category<br>
                 👍👎 Thumb Up/Down (Hold) for Basket Add / Remove<br>
                 👌 OK Sign (Pinch) (Hold) to Review / Submit<br>
-                🤲 Both Palms (Hold) to Start/Stop AI Assistant<br>
+                🤲 Palm to Start/Stop AI Assistant<br>
                 <span id="ai-hints"></span>
             </div>
         </footer>
@@ -1701,9 +1701,6 @@
             recorder: new AudioRecorder(),
             streamer: new AudioStreamer(),
             apiKey: 'AIzaSyC-xTy0Paqhs9uqkuzCpcXucO32nNsSX9c', // Injected
-            videoCaptureInterval: null,
-            videoCanvas: null,
-            videoCanvasCtx: null,
 
             async connect() {
                 if (this.isConnected) return;
@@ -1711,17 +1708,17 @@
 
                 const client = new window.GoogleGenAI({ apiKey: this.apiKey });
 
-                const sysInstruction = "You are a Stacey, helpful shopping assistant at Staxel interactive AI billboard. " +
-                    "You are based in the The Residency house running Break In program by YC S25 startup Dedalus Labs developing platform for MCP agents. " +
+                const sysInstruction = "You are a helpful shopping assistant at Staxel interactive AI billboard. " +
+                    "You are part of the Break In program in The Residency run by YC S25 startup Dedalus Labs. " +
                     "You have access to the following product list: " + JSON.stringify(DATA.skus) + ". " +
                     "Be concise, friendly, and helpful. Keep answers short. " +
-                    "IMPORTANT: When the conversation starts, immediately introduce yourself and welcome the user to Staxel.";
+                    "IMPORTANT: When the conversation starts, immediately introduce yourself and welcome the user to OnlyHands.";
 
                 try {
                     this.session = await client.live.connect({
                         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
                         config: {
-                            responseModalities: [window.Modality.AUDIO, window.Modality.VIDEO],
+                            responseModalities: [window.Modality.AUDIO],
                             systemInstruction: sysInstruction,
                         },
                         callbacks: {
@@ -1761,38 +1758,6 @@
                     // Remove old explicit listeners and manual feedback setting since callbacks handle it
                     // this.session.on('content', ...) -> Removed
 
-                    // Setup video capture canvas
-                    this.videoCanvas = document.createElement('canvas');
-                    this.videoCanvasCtx = this.videoCanvas.getContext('2d');
-                    const videoElement = document.getElementById('input-video');
-                    
-                    // Start video frame capture (send frames at ~2fps to reduce bandwidth)
-                    this.videoCaptureInterval = setInterval(() => {
-                        if (!this.session || !this.isConnected || !videoElement || videoElement.readyState !== 4) return;
-                        
-                        try {
-                            // Set canvas dimensions to match video
-                            this.videoCanvas.width = videoElement.videoWidth || 640;
-                            this.videoCanvas.height = videoElement.videoHeight || 480;
-                            
-                            // Draw current video frame to canvas
-                            this.videoCanvasCtx.drawImage(videoElement, 0, 0, this.videoCanvas.width, this.videoCanvas.height);
-                            
-                            // Convert to base64 JPEG (smaller than PNG)
-                            const frameData = this.videoCanvas.toDataURL('image/jpeg', 0.8).split(',')[1]; // Remove data:image/jpeg;base64, prefix
-                            
-                            // Send video frame
-                            this.session.sendRealtimeInput({
-                                video: {
-                                    mimeType: 'image/jpeg',
-                                    data: frameData
-                                }
-                            });
-                        } catch (e) {
-                            console.warn('Video capture error:', e);
-                        }
-                    }, 500); // Send frame every 500ms (2fps)
-
                     await this.recorder.start((base64) => {
                         if (!this.session) return; // SAFETY: Don't send if disconnected
                         this.session.sendRealtimeInput({
@@ -1812,14 +1777,6 @@
 
             async disconnect() {
                 if (!this.isConnected) return;
-
-                // Stop video capture
-                if (this.videoCaptureInterval) {
-                    clearInterval(this.videoCaptureInterval);
-                    this.videoCaptureInterval = null;
-                }
-                this.videoCanvas = null;
-                this.videoCanvasCtx = null;
 
                 this.recorder.stop();
                 this.streamer.stop();
